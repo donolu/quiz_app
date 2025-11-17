@@ -1,7 +1,7 @@
 import json
 import os
 from threading import RLock
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -59,6 +59,8 @@ _SHEETS_CLIENT = None
 _SHEETS_DOC = None
 
 _DATA_LOCK = RLock()
+_QUESTIONS_CACHE: Optional[pd.DataFrame] = None
+_SCORES_CACHE: Optional[pd.DataFrame] = None
 
 
 # =============================================================================
@@ -151,7 +153,17 @@ def _get_worksheet(title: str):
     except gspread.WorksheetNotFound:
         rows = 1000
         cols = 26
-        return spreadsheet.add_worksheet(title=title, rows=str(rows), cols=str(cols))
+    return spreadsheet.add_worksheet(title=title, rows=str(rows), cols=str(cols))
+
+
+def _invalidate_questions_cache():
+    global _QUESTIONS_CACHE
+    _QUESTIONS_CACHE = None
+
+
+def _invalidate_scores_cache():
+    global _SCORES_CACHE
+    _SCORES_CACHE = None
 
 
 def _write_sheet(ws, df: pd.DataFrame, columns: List[str]) -> None:
@@ -201,6 +213,10 @@ def ensure_data_files():
 # =============================================================================
 def load_questions() -> pd.DataFrame:
     ensure_data_files()
+
+    global _QUESTIONS_CACHE
+    if _QUESTIONS_CACHE is not None:
+        return _QUESTIONS_CACHE.copy()
 
     if _USE_SHEETS:
         ws = _get_worksheet(GOOGLE_SHEETS_QUESTIONS_WS)
@@ -268,6 +284,7 @@ def load_questions() -> pd.DataFrame:
         axis=1,
     )
 
+    _QUESTIONS_CACHE = df.copy()
     return df
 
 
@@ -296,10 +313,12 @@ def save_questions(df: pd.DataFrame) -> None:
         ws = _get_worksheet(GOOGLE_SHEETS_QUESTIONS_WS)
         if ws:
             _write_sheet(ws, df_to_save, _QUESTION_COLUMNS)
+        _invalidate_questions_cache()
         return
 
     with _DATA_LOCK:
         df_to_save.to_csv(QUESTIONS_FILE, index=False)
+    _invalidate_questions_cache()
 
 
 # =============================================================================
@@ -307,14 +326,20 @@ def save_questions(df: pd.DataFrame) -> None:
 # =============================================================================
 def load_scores() -> pd.DataFrame:
     ensure_data_files()
+    global _SCORES_CACHE
+    if _SCORES_CACHE is not None:
+        return _SCORES_CACHE.copy()
+
     if _USE_SHEETS:
         ws = _get_worksheet(GOOGLE_SHEETS_SCORES_WS)
         records = ws.get_all_records() if ws else []
         df = pd.DataFrame(records)
-        return df
+    else:
+        with _DATA_LOCK:
+            df = pd.read_csv(SCORES_FILE)
 
-    with _DATA_LOCK:
-        return pd.read_csv(SCORES_FILE)
+    _SCORES_CACHE = df.copy()
+    return df
 
 
 # =============================================================================
@@ -327,10 +352,12 @@ def save_scores(df: pd.DataFrame) -> None:
         ws = _get_worksheet(GOOGLE_SHEETS_SCORES_WS)
         if ws:
             _write_sheet(ws, df_to_save, _SCORE_COLUMNS)
+        _invalidate_scores_cache()
         return
 
     with _DATA_LOCK:
         df_to_save.to_csv(SCORES_FILE, index=False)
+    _invalidate_scores_cache()
 
 
 # =============================================================================
