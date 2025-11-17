@@ -6,9 +6,10 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 try:
-    from . import sheets_bridge
+    from supabase import Client, create_client
 except ImportError:  # pragma: no cover - optional dependency
-    sheets_bridge = None
+    Client = None
+    create_client = None
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -45,14 +46,13 @@ _SCORE_COLUMNS = [
     "time_limit_minutes",
 ]
 
-GOOGLE_SHEETS_CREDS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
-GOOGLE_SHEETS_SPREADSHEET_ID = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID")
-GOOGLE_SHEETS_QUESTIONS_WS = os.environ.get("GOOGLE_SHEETS_QUESTIONS_WS", "questions")
-GOOGLE_SHEETS_SCORES_WS = os.environ.get("GOOGLE_SHEETS_SCORES_WS", "scores")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_QUESTIONS_TABLE = os.environ.get("SUPABASE_QUESTIONS_TABLE", "questions")
+SUPABASE_SCORES_TABLE = os.environ.get("SUPABASE_SCORES_TABLE", "scores")
 
-_USE_SHEETS = bool(
-    GOOGLE_SHEETS_CREDS and GOOGLE_SHEETS_SPREADSHEET_ID and sheets_bridge
-)
+_USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY and create_client)
+_SUPABASE_CLIENT: Optional[Client] = None
 
 _DATA_LOCK = RLock()
 _QUESTIONS_CACHE: Optional[pd.DataFrame] = None
@@ -123,19 +123,56 @@ def _empty_scores_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_SCORE_COLUMNS)
 
 
-def _read_sheet(worksheet: str) -> List[List[str]]:
-    if not _USE_SHEETS:
-        return []
-    try:
-        return sheets_bridge.read_sheet(worksheet)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Invalid GOOGLE_SHEETS_CREDENTIALS JSON") from exc
+def _get_supabase_client() -> Optional[Client]:
+    global _SUPABASE_CLIENT
+    if not _USE_SUPABASE:
+        return None
+    if _SUPABASE_CLIENT is None:
+        _SUPABASE_CLIENT = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _SUPABASE_CLIENT
 
 
-def _write_sheet(worksheet: str, columns: List[str], rows: List[List[str]]) -> None:
-    if not _USE_SHEETS:
-        return
-    sheets_bridge.write_sheet(worksheet, columns, rows)
+def _prepare_question_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    for row in df.to_dict("records"):
+        record = row.copy()
+        if isinstance(record.get("options"), str):
+            try:
+                record["options"] = json.loads(record["options"])
+            except json.JSONDecodeError:
+                record["options"] = []
+        if isinstance(record.get("correct_answers"), str):
+            try:
+                record["correct_answers"] = json.loads(record["correct_answers"])
+            except json.JSONDecodeError:
+                record["correct_answers"] = []
+        record["allow_multiple"] = bool(record.get("allow_multiple"))
+        if record.get("id") is not None:
+            record["id"] = int(record["id"])
+        records.append(record)
+    return records
+
+
+def _prepare_score_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    for row in df.to_dict("records"):
+        record = row.copy()
+        if "score" in record:
+            try:
+                record["score"] = float(record["score"])
+            except (TypeError, ValueError):
+                record["score"] = 0.0
+        if "total_questions" in record:
+            try:
+                record["total_questions"] = int(record["total_questions"])
+            except (TypeError, ValueError):
+                record["total_questions"] = 0
+        records.append(record)
+    return records
+
+
+def _supabase_delete_all(client: Client, table: str, column: str, sentinel) -> None:
+    client.table(table).delete().neq(column, sentinel).execute()
 
 
 def _invalidate_questions_cache():
@@ -161,15 +198,20 @@ def _write_sheet(ws, df: pd.DataFrame, columns: List[str]) -> None:
 
 
 def ensure_data_files():
-    if _USE_SHEETS:
-        for ws_name, columns, seed_df in [
-            (GOOGLE_SHEETS_QUESTIONS_WS, _QUESTION_COLUMNS, _seed_questions_df()),
-            (GOOGLE_SHEETS_SCORES_WS, _SCORE_COLUMNS, _empty_scores_df()),
-        ]:
-            values = _read_sheet(ws_name)
-            if len(values) <= 1:
-                rows = seed_df.reindex(columns=columns).fillna("").values.tolist()
-                _write_sheet(ws_name, columns, rows)
+    if _USE_SUPABASE:
+        client = _get_supabase_client()
+        if client:
+            resp = (
+                client.table(SUPABASE_QUESTIONS_TABLE).select("id").limit(1).execute()
+            )
+            if not resp.data:
+                seed_records = _prepare_question_records(_seed_questions_df())
+                if seed_records:
+                    client.table(SUPABASE_QUESTIONS_TABLE).insert(
+                        seed_records
+                    ).execute()
+            # Scores table can remain empty; ensure table exists by touching it
+            client.table(SUPABASE_SCORES_TABLE).select("name").limit(1).execute()
         return
 
     with _DATA_LOCK:
@@ -196,21 +238,10 @@ def load_questions() -> pd.DataFrame:
     if _QUESTIONS_CACHE is not None:
         return _QUESTIONS_CACHE.copy()
 
-    if _USE_SHEETS:
-        raw_values = _read_sheet(GOOGLE_SHEETS_QUESTIONS_WS)
-        if not raw_values:
-            df = pd.DataFrame(columns=_QUESTION_COLUMNS)
-        else:
-            header = raw_values[0]
-            rows = raw_values[1:]
-            normalized = []
-            for row in rows:
-                record = {
-                    header[idx]: row[idx] if idx < len(row) else ""
-                    for idx in range(len(header))
-                }
-                normalized.append(record)
-            df = pd.DataFrame(normalized)
+    if _USE_SUPABASE:
+        client = _get_supabase_client()
+        resp = client.table(SUPABASE_QUESTIONS_TABLE).select("*").execute()
+        df = pd.DataFrame(resp.data or [])
     else:
         with _DATA_LOCK:
             df = pd.read_csv(QUESTIONS_FILE)
@@ -298,9 +329,13 @@ def save_questions(df: pd.DataFrame) -> None:
             lambda ans: len(json.loads(ans)) > 1
         )
 
-    if _USE_SHEETS:
-        rows = df_to_save.reindex(columns=_QUESTION_COLUMNS).fillna("").values.tolist()
-        _write_sheet(GOOGLE_SHEETS_QUESTIONS_WS, _QUESTION_COLUMNS, rows)
+    if _USE_SUPABASE:
+        client = _get_supabase_client()
+        if client:
+            records = _prepare_question_records(df)
+            _supabase_delete_all(client, SUPABASE_QUESTIONS_TABLE, "id", -1)
+            if records:
+                client.table(SUPABASE_QUESTIONS_TABLE).insert(records).execute()
         _invalidate_questions_cache()
         return
 
@@ -318,24 +353,16 @@ def load_scores() -> pd.DataFrame:
     if _SCORES_CACHE is not None:
         return _SCORES_CACHE.copy()
 
-    if _USE_SHEETS:
-        raw_values = _read_sheet(GOOGLE_SHEETS_SCORES_WS)
-        if not raw_values:
-            df = pd.DataFrame(columns=_SCORE_COLUMNS)
-        else:
-            header = raw_values[0]
-            rows = raw_values[1:]
-            normalized = []
-            for row in rows:
-                record = {
-                    header[idx]: row[idx] if idx < len(row) else ""
-                    for idx in range(len(header))
-                }
-                normalized.append(record)
-            df = pd.DataFrame(normalized)
+    if _USE_SUPABASE:
+        client = _get_supabase_client()
+        resp = client.table(SUPABASE_SCORES_TABLE).select("*").execute()
+        df = pd.DataFrame(resp.data or [])
     else:
         with _DATA_LOCK:
             df = pd.read_csv(SCORES_FILE)
+
+    if df.empty:
+        df = pd.DataFrame(columns=_SCORE_COLUMNS)
 
     _SCORES_CACHE = df.copy()
     return df
@@ -347,9 +374,13 @@ def load_scores() -> pd.DataFrame:
 def save_scores(df: pd.DataFrame) -> None:
     ensure_data_files()
     df_to_save = df.copy()
-    if _USE_SHEETS:
-        rows = df_to_save.reindex(columns=_SCORE_COLUMNS).fillna("").values.tolist()
-        _write_sheet(GOOGLE_SHEETS_SCORES_WS, _SCORE_COLUMNS, rows)
+    if _USE_SUPABASE:
+        client = _get_supabase_client()
+        if client:
+            records = _prepare_score_records(df)
+            _supabase_delete_all(client, SUPABASE_SCORES_TABLE, "name", "__never__")
+            if records:
+                client.table(SUPABASE_SCORES_TABLE).insert(records).execute()
         _invalidate_scores_cache()
         return
 
