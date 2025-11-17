@@ -132,7 +132,9 @@ def _get_supabase_client() -> Optional[Client]:
     return _SUPABASE_CLIENT
 
 
-def _prepare_question_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+def _prepare_question_records(
+    df: pd.DataFrame, include_id: bool = True
+) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     for row in df.to_dict("records"):
         record = row.copy()
@@ -147,16 +149,23 @@ def _prepare_question_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
             except json.JSONDecodeError:
                 record["correct_answers"] = []
         record["allow_multiple"] = bool(record.get("allow_multiple"))
-        if record.get("id") is not None:
-            record["id"] = int(record["id"])
+        if include_id:
+            if record.get("id") is not None:
+                record["id"] = int(record["id"])
+        else:
+            record.pop("id", None)
         records.append(record)
     return records
 
 
-def _prepare_score_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+def _prepare_score_records(
+    df: pd.DataFrame, include_id: bool = True
+) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     for row in df.to_dict("records"):
         record = row.copy()
+        if not include_id:
+            record.pop("id", None)
         if "score" in record:
             try:
                 record["score"] = float(record["score"])
@@ -185,18 +194,6 @@ def _invalidate_scores_cache():
     _SCORES_CACHE = None
 
 
-def _write_sheet(ws, df: pd.DataFrame, columns: List[str]) -> None:
-    df_out = df.copy()
-    for col in columns:
-        if col not in df_out.columns:
-            df_out[col] = ""
-    df_out = df_out.reindex(columns=columns)
-    df_out = df_out.fillna("")
-    data = [columns] + df_out.values.tolist()
-    ws.clear()
-    ws.update(data)
-
-
 def ensure_data_files():
     if _USE_SUPABASE:
         client = _get_supabase_client()
@@ -205,7 +202,9 @@ def ensure_data_files():
                 client.table(SUPABASE_QUESTIONS_TABLE).select("id").limit(1).execute()
             )
             if not resp.data:
-                seed_records = _prepare_question_records(_seed_questions_df())
+                seed_records = _prepare_question_records(
+                    _seed_questions_df(), include_id=False
+                )
                 if seed_records:
                     client.table(SUPABASE_QUESTIONS_TABLE).insert(
                         seed_records
@@ -332,7 +331,7 @@ def save_questions(df: pd.DataFrame) -> None:
     if _USE_SUPABASE:
         client = _get_supabase_client()
         if client:
-            records = _prepare_question_records(df)
+            records = _prepare_question_records(df, include_id=False)
             _supabase_delete_all(client, SUPABASE_QUESTIONS_TABLE, "id", -1)
             if records:
                 client.table(SUPABASE_QUESTIONS_TABLE).insert(records).execute()
@@ -377,7 +376,7 @@ def save_scores(df: pd.DataFrame) -> None:
     if _USE_SUPABASE:
         client = _get_supabase_client()
         if client:
-            records = _prepare_score_records(df)
+            records = _prepare_score_records(df, include_id=False)
             _supabase_delete_all(client, SUPABASE_SCORES_TABLE, "name", "__never__")
             if records:
                 client.table(SUPABASE_SCORES_TABLE).insert(records).execute()
