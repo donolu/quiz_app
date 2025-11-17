@@ -16,7 +16,7 @@ from utils.loader import (
 )
 from utils.quiz_engine import calculate_score, get_randomised_quiz
 
-APP_TITLE = "📘 Quiz Game"
+APP_TITLE = "📘 Accounting Quiz Game"
 PAGE_SLUGS = {
     "Home": "home",
     "Take Quiz": "take_quiz",

@@ -6,11 +6,9 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 try:
-    import gspread
-    from google.oauth2.service_account import Credentials
+    from . import sheets_bridge
 except ImportError:  # pragma: no cover - optional dependency
-    gspread = None
-    Credentials = None
+    sheets_bridge = None
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -53,10 +51,8 @@ GOOGLE_SHEETS_QUESTIONS_WS = os.environ.get("GOOGLE_SHEETS_QUESTIONS_WS", "quest
 GOOGLE_SHEETS_SCORES_WS = os.environ.get("GOOGLE_SHEETS_SCORES_WS", "scores")
 
 _USE_SHEETS = bool(
-    GOOGLE_SHEETS_CREDS and GOOGLE_SHEETS_SPREADSHEET_ID and gspread and Credentials
+    GOOGLE_SHEETS_CREDS and GOOGLE_SHEETS_SPREADSHEET_ID and sheets_bridge
 )
-_SHEETS_CLIENT = None
-_SHEETS_DOC = None
 
 _DATA_LOCK = RLock()
 _QUESTIONS_CACHE: Optional[pd.DataFrame] = None
@@ -127,33 +123,19 @@ def _empty_scores_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_SCORE_COLUMNS)
 
 
-def _get_spreadsheet():
-    global _SHEETS_CLIENT, _SHEETS_DOC
+def _read_sheet(worksheet: str) -> List[List[str]]:
     if not _USE_SHEETS:
-        return None
-    if _SHEETS_CLIENT is None:
-        try:
-            creds_info = json.loads(GOOGLE_SHEETS_CREDS)
-        except json.JSONDecodeError as exc:  # pragma: no cover - user config
-            raise RuntimeError("Invalid GOOGLE_SHEETS_CREDENTIALS JSON") from exc
-        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        credentials = Credentials.from_service_account_info(creds_info, scopes=scopes)
-        _SHEETS_CLIENT = gspread.authorize(credentials)
-    if _SHEETS_DOC is None:
-        _SHEETS_DOC = _SHEETS_CLIENT.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
-    return _SHEETS_DOC
-
-
-def _get_worksheet(title: str):
-    spreadsheet = _get_spreadsheet()
-    if spreadsheet is None:
-        return None
+        return []
     try:
-        return spreadsheet.worksheet(title)
-    except gspread.WorksheetNotFound:
-        rows = 1000
-        cols = 26
-    return spreadsheet.add_worksheet(title=title, rows=str(rows), cols=str(cols))
+        return sheets_bridge.read_sheet(worksheet)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Invalid GOOGLE_SHEETS_CREDENTIALS JSON") from exc
+
+
+def _write_sheet(worksheet: str, columns: List[str], rows: List[List[str]]) -> None:
+    if not _USE_SHEETS:
+        return
+    sheets_bridge.write_sheet(worksheet, columns, rows)
 
 
 def _invalidate_questions_cache():
@@ -180,18 +162,14 @@ def _write_sheet(ws, df: pd.DataFrame, columns: List[str]) -> None:
 
 def ensure_data_files():
     if _USE_SHEETS:
-        spreadsheet = _get_spreadsheet()
-        questions_ws = _get_worksheet(GOOGLE_SHEETS_QUESTIONS_WS)
-        scores_ws = _get_worksheet(GOOGLE_SHEETS_SCORES_WS)
-
-        if questions_ws:
-            values = questions_ws.get_all_values()
+        for ws_name, columns, seed_df in [
+            (GOOGLE_SHEETS_QUESTIONS_WS, _QUESTION_COLUMNS, _seed_questions_df()),
+            (GOOGLE_SHEETS_SCORES_WS, _SCORE_COLUMNS, _empty_scores_df()),
+        ]:
+            values = _read_sheet(ws_name)
             if len(values) <= 1:
-                _write_sheet(questions_ws, _seed_questions_df(), _QUESTION_COLUMNS)
-        if scores_ws:
-            values = scores_ws.get_all_values()
-            if len(values) <= 1:
-                _write_sheet(scores_ws, _empty_scores_df(), _SCORE_COLUMNS)
+                rows = seed_df.reindex(columns=columns).fillna("").values.tolist()
+                _write_sheet(ws_name, columns, rows)
         return
 
     with _DATA_LOCK:
@@ -219,9 +197,17 @@ def load_questions() -> pd.DataFrame:
         return _QUESTIONS_CACHE.copy()
 
     if _USE_SHEETS:
-        ws = _get_worksheet(GOOGLE_SHEETS_QUESTIONS_WS)
-        records = ws.get_all_records() if ws else []
-        df = pd.DataFrame(records)
+        raw_values = _read_sheet(GOOGLE_SHEETS_QUESTIONS_WS)
+        if not raw_values:
+            df = pd.DataFrame(columns=_QUESTION_COLUMNS)
+        else:
+            header = raw_values[0]
+            rows = raw_values[1:]
+            normalized = []
+            for row in rows:
+                record = {header[idx]: row[idx] if idx < len(row) else "" for idx in range(len(header))}
+                normalized.append(record)
+            df = pd.DataFrame(normalized)
     else:
         with _DATA_LOCK:
             df = pd.read_csv(QUESTIONS_FILE)
@@ -310,9 +296,8 @@ def save_questions(df: pd.DataFrame) -> None:
         )
 
     if _USE_SHEETS:
-        ws = _get_worksheet(GOOGLE_SHEETS_QUESTIONS_WS)
-        if ws:
-            _write_sheet(ws, df_to_save, _QUESTION_COLUMNS)
+        rows = df_to_save.reindex(columns=_QUESTION_COLUMNS).fillna("").values.tolist()
+        _write_sheet(GOOGLE_SHEETS_QUESTIONS_WS, _QUESTION_COLUMNS, rows)
         _invalidate_questions_cache()
         return
 
@@ -349,9 +334,8 @@ def save_scores(df: pd.DataFrame) -> None:
     ensure_data_files()
     df_to_save = df.copy()
     if _USE_SHEETS:
-        ws = _get_worksheet(GOOGLE_SHEETS_SCORES_WS)
-        if ws:
-            _write_sheet(ws, df_to_save, _SCORE_COLUMNS)
+        rows = df_to_save.reindex(columns=_SCORE_COLUMNS).fillna("").values.tolist()
+        _write_sheet(GOOGLE_SHEETS_SCORES_WS, _SCORE_COLUMNS, rows)
         _invalidate_scores_cache()
         return
 
