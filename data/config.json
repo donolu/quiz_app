@@ -1,0 +1,13 @@
+{
+  "show_explanations_for_correct": true,
+  "module_time_limits": {},
+  "module_availability": {
+    "Accounting Basics": false,
+    "Cost & Managerial Accounting": true,
+    "Financial Ratios": false,
+    "Financial Statements": false,
+    "Internal Control & Ethics": false,
+    "Journal Entries & Adjustments": false,
+    "Budgeting": true
+  }
+}
