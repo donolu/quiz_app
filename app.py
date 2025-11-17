@@ -665,6 +665,20 @@ def admin_page():
         st.info("No questions to delete.")
 
     # ---------------------------
+    # Clear entire question bank
+    # ---------------------------
+    st.markdown("---")
+    st.subheader("🧹 Clear entire question bank")
+    st.warning(
+        "This will permanently remove all questions. This action cannot be undone."
+    )
+    if st.button("Delete ALL questions", type="secondary"):
+        empty_df = pd.DataFrame(columns=questions_df.columns)
+        save_questions(empty_df)
+        st.success("All questions deleted.")
+        st.experimental_rerun()
+
+    # ---------------------------
     # Export questions
     # ---------------------------
     st.markdown("---")
