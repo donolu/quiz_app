@@ -676,7 +676,7 @@ def admin_page():
         empty_df = pd.DataFrame(columns=questions_df.columns)
         save_questions(empty_df)
         st.success("All questions deleted.")
-        st.experimental_rerun()
+        st.rerun()
 
     # ---------------------------
     # Export questions
