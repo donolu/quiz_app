@@ -57,6 +57,7 @@ _SUPABASE_CLIENT: Optional[Client] = None
 _DATA_LOCK = RLock()
 _QUESTIONS_CACHE: Optional[pd.DataFrame] = None
 _SCORES_CACHE: Optional[pd.DataFrame] = None
+_SUPABASE_INITIALISED = False
 
 
 # =============================================================================
@@ -196,6 +197,9 @@ def _invalidate_scores_cache():
 
 def ensure_data_files():
     if _USE_SUPABASE:
+        global _SUPABASE_INITIALISED
+        if _SUPABASE_INITIALISED:
+            return
         client = _get_supabase_client()
         if client:
             resp = (
@@ -209,8 +213,8 @@ def ensure_data_files():
                     client.table(SUPABASE_QUESTIONS_TABLE).insert(
                         seed_records
                     ).execute()
-            # Scores table can remain empty; ensure table exists by touching it
             client.table(SUPABASE_SCORES_TABLE).select("name").limit(1).execute()
+        _SUPABASE_INITIALISED = True
         return
 
     with _DATA_LOCK:
