@@ -60,6 +60,26 @@ _SCORES_CACHE: Optional[pd.DataFrame] = None
 _SUPABASE_INITIALISED = False
 
 
+def _normalise_options(raw: Any) -> List[str]:
+    if isinstance(raw, list):
+        return [str(opt).strip() for opt in raw if str(opt).strip()]
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                data = json.loads(text)
+                if isinstance(data, list):
+                    return [str(opt).strip() for opt in data if str(opt).strip()]
+            except json.JSONDecodeError:
+                pass
+        if "|" in text:
+            return [part.strip() for part in text.split("|") if part.strip()]
+        return [text]
+    return []
+
+
 # =============================================================================
 # Ensure the data directory and CSV files exist
 # =============================================================================
@@ -254,9 +274,7 @@ def load_questions() -> pd.DataFrame:
 
     option_cols = [c for c in df.columns if c.lower().startswith("option")]
     if "options" in df.columns:
-        df["options"] = df["options"].apply(
-            lambda x: json.loads(x) if isinstance(x, str) and x.strip() else []
-        )
+        df["options"] = df["options"].apply(_normalise_options)
     elif option_cols:
 
         def _collect_options(row):
