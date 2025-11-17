@@ -1,6 +1,6 @@
-from datetime import datetime
 import json
 import os
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -16,7 +16,7 @@ from utils.loader import (
 )
 from utils.quiz_engine import calculate_score, get_randomised_quiz
 
-APP_TITLE = "📘 Accounting Quiz Game"
+APP_TITLE = "📘 Quiz Game"
 PAGE_SLUGS = {
     "Home": "home",
     "Take Quiz": "take_quiz",
@@ -163,7 +163,9 @@ def quiz_page():
         default_time_limit = module_time_limit_minutes or 0
         if module_time_limit_minutes is not None:
             if module_time_limit_minutes not in time_limit_options:
-                time_limit_options = sorted(set(time_limit_options + [module_time_limit_minutes]))
+                time_limit_options = sorted(
+                    set(time_limit_options + [module_time_limit_minutes])
+                )
             time_limit = st.selectbox(
                 "Time limit (minutes)",
                 time_limit_options,
@@ -188,7 +190,9 @@ def quiz_page():
         st.session_state.quiz_answers = {}
         st.session_state.quiz_start_time = datetime.now()
         st.session_state.quiz_module = selected_module
-        st.session_state.quiz_run_id = f"run_{st.session_state.quiz_start_time.timestamp()}"
+        st.session_state.quiz_run_id = (
+            f"run_{st.session_state.quiz_start_time.timestamp()}"
+        )
 
         quiz_q = get_randomised_quiz(
             questions_df, module=selected_module, num_questions=int(num_questions)
@@ -476,9 +480,7 @@ def admin_page():
 
         allow_multi = st.checkbox("Allow multiple correct answers")
         correct_choices = (
-            st.multiselect("Select correct answer(s)", options)
-            if options
-            else []
+            st.multiselect("Select correct answer(s)", options) if options else []
         )
         difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
         image = st.text_input("Image URL (optional)")
@@ -531,9 +533,13 @@ def admin_page():
     st.subheader("✏️ Edit an existing question")
     if not questions_df.empty:
         q_ids = questions_df["id"].astype(int).tolist()
-        edit_id = st.selectbox("Select question ID to edit", q_ids, key="edit_question_select")
+        edit_id = st.selectbox(
+            "Select question ID to edit", q_ids, key="edit_question_select"
+        )
         edit_row = questions_df[questions_df["id"] == edit_id].iloc[0]
-        row_options = edit_row["options"] if isinstance(edit_row["options"], list) else []
+        row_options = (
+            edit_row["options"] if isinstance(edit_row["options"], list) else []
+        )
         max_opts = max(6, len(row_options))
         with st.form(f"edit_question_form_{edit_id}"):
             module_edit = st.text_input("Module / Topic", value=edit_row["module"])
@@ -553,7 +559,9 @@ def admin_page():
                         key=f"edit_option_{edit_id}_{i}",
                     )
                 )
-            options_updated = [opt.strip() for opt in option_inputs if opt and opt.strip()]
+            options_updated = [
+                opt.strip() for opt in option_inputs if opt and opt.strip()
+            ]
             if allow_multi_edit:
                 correct_defaults = edit_row.get("correct_answers", [])
                 correct_edit = st.multiselect(
@@ -568,18 +576,26 @@ def admin_page():
                 correct_choice = st.selectbox(
                     "Select the correct answer",
                     options_updated,
-                    index=options_updated.index(default_value) if default_value in options_updated else 0,
+                    index=options_updated.index(default_value)
+                    if default_value in options_updated
+                    else 0,
                     key=f"edit_correct_single_{edit_id}",
                 )
                 correct_edit = [correct_choice]
             difficulty_edit = st.selectbox(
                 "Difficulty",
                 ["Easy", "Medium", "Hard"],
-                index=["Easy", "Medium", "Hard"].index(edit_row.get("difficulty", "Easy")),
+                index=["Easy", "Medium", "Hard"].index(
+                    edit_row.get("difficulty", "Easy")
+                ),
                 key=f"edit_difficulty_{edit_id}",
             )
-            image_edit = st.text_input("Image URL (optional)", value=edit_row.get("image", ""))
-            explanation_edit = st.text_area("Explanation", value=edit_row.get("explanation", ""))
+            image_edit = st.text_input(
+                "Image URL (optional)", value=edit_row.get("image", "")
+            )
+            explanation_edit = st.text_area(
+                "Explanation", value=edit_row.get("explanation", "")
+            )
             submitted_edit = st.form_submit_button("Save changes")
         if submitted_edit:
             if (
@@ -591,7 +607,9 @@ def admin_page():
                 st.error("Please complete all required fields before saving.")
             else:
                 if allow_multi_edit and len(correct_edit) < 2:
-                    st.error("Select at least two correct answers for multi-answer questions.")
+                    st.error(
+                        "Select at least two correct answers for multi-answer questions."
+                    )
                 elif not allow_multi_edit and len(correct_edit) != 1:
                     st.error("Select exactly one correct answer.")
                 elif any(ans not in options_updated for ans in correct_edit):
@@ -610,7 +628,9 @@ def admin_page():
                         "explanation": explanation_edit.strip(),
                     }
                     questions_df = questions_df[questions_df["id"] != edit_id]
-                    questions_df = pd.concat([questions_df, pd.DataFrame([updated_row])], ignore_index=True)
+                    questions_df = pd.concat(
+                        [questions_df, pd.DataFrame([updated_row])], ignore_index=True
+                    )
                     questions_df = questions_df.sort_values("id").reset_index(drop=True)
                     save_questions(questions_df)
                     st.success(f"Question {edit_id} updated.")
@@ -626,7 +646,9 @@ def admin_page():
 
     if not questions_df.empty:
         delete_ids = questions_df["id"].astype(int).tolist()
-        del_id = st.selectbox("Select question ID to delete", delete_ids, key="delete_question_select")
+        del_id = st.selectbox(
+            "Select question ID to delete", delete_ids, key="delete_question_select"
+        )
         if st.button("Delete selected question"):
             questions_df = questions_df[questions_df["id"] != del_id]
             save_questions(questions_df)
@@ -695,11 +717,15 @@ def admin_page():
                             try:
                                 data = json.loads(text)
                                 if isinstance(data, list):
-                                    return [str(v).strip() for v in data if str(v).strip()]
+                                    return [
+                                        str(v).strip() for v in data if str(v).strip()
+                                    ]
                             except json.JSONDecodeError:
                                 pass
                         if "|" in text:
-                            return [part.strip() for part in text.split("|") if part.strip()]
+                            return [
+                                part.strip() for part in text.split("|") if part.strip()
+                            ]
                         return [text]
                     return []
 

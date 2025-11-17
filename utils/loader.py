@@ -1,7 +1,7 @@
 import json
 import os
 from threading import RLock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pandas as pd
 
