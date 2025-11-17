@@ -252,11 +252,26 @@ def load_questions() -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=_QUESTION_COLUMNS)
 
-    # Convert JSON string in options → list
+    option_cols = [c for c in df.columns if c.lower().startswith("option")]
     if "options" in df.columns:
         df["options"] = df["options"].apply(
             lambda x: json.loads(x) if isinstance(x, str) and x.strip() else []
         )
+    elif option_cols:
+
+        def _collect_options(row):
+            opts = []
+            for col in sorted(
+                option_cols, key=lambda x: int("".join(filter(str.isdigit, x)) or 0)
+            ):
+                val = row.get(col)
+                if isinstance(val, str) and val.strip():
+                    opts.append(val.strip())
+            return opts
+
+        df["options"] = df.apply(_collect_options, axis=1)
+    else:
+        df["options"] = [[] for _ in range(len(df))]
 
     # Ensure explanation column exists
     if "explanation" not in df.columns:
