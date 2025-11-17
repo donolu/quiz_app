@@ -360,6 +360,13 @@ def leaderboard_page():
         st.info("No results for this module yet.")
         return
 
+    df["score"] = pd.to_numeric(df["score"], errors="coerce")
+    df["total_questions"] = pd.to_numeric(df["total_questions"], errors="coerce")
+    df = df.dropna(subset=["score", "total_questions"])
+    if df.empty:
+        st.info("No quiz results yet.")
+        return
+
     df["percentage"] = (df["score"] / df["total_questions"] * 100).round(1)
     df_sorted = df.sort_values(by=["percentage", "timestamp"], ascending=[False, True])
 
