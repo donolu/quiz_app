@@ -205,7 +205,10 @@ def load_questions() -> pd.DataFrame:
             rows = raw_values[1:]
             normalized = []
             for row in rows:
-                record = {header[idx]: row[idx] if idx < len(row) else "" for idx in range(len(header))}
+                record = {
+                    header[idx]: row[idx] if idx < len(row) else ""
+                    for idx in range(len(header))
+                }
                 normalized.append(record)
             df = pd.DataFrame(normalized)
     else:
@@ -316,9 +319,20 @@ def load_scores() -> pd.DataFrame:
         return _SCORES_CACHE.copy()
 
     if _USE_SHEETS:
-        ws = _get_worksheet(GOOGLE_SHEETS_SCORES_WS)
-        records = ws.get_all_records() if ws else []
-        df = pd.DataFrame(records)
+        raw_values = _read_sheet(GOOGLE_SHEETS_SCORES_WS)
+        if not raw_values:
+            df = pd.DataFrame(columns=_SCORE_COLUMNS)
+        else:
+            header = raw_values[0]
+            rows = raw_values[1:]
+            normalized = []
+            for row in rows:
+                record = {
+                    header[idx]: row[idx] if idx < len(row) else ""
+                    for idx in range(len(header))
+                }
+                normalized.append(record)
+            df = pd.DataFrame(normalized)
     else:
         with _DATA_LOCK:
             df = pd.read_csv(SCORES_FILE)

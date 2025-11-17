@@ -70,9 +70,7 @@ def calculate_score(
         is_correct = False
 
         if allow_multiple:
-            user_selection = (
-                user_response if isinstance(user_response, list) else []
-            )
+            user_selection = user_response if isinstance(user_response, list) else []
             correct_set = set(correct_answers)
             user_set = set(user_selection)
             true_pos = len(user_set & correct_set)
