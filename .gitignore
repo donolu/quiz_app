@@ -1,1 +1,8 @@
 ./streamlit-apps-449621-24df9e5876a3.json
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
+.env
+*.log
