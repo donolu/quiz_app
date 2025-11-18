@@ -401,12 +401,19 @@ def leaderboard_page():
         return
 
     df["percentage"] = (df["score"] / df["total_questions"] * 100).round(1)
+
+    # Sort by percentage (descending), then timestamp (ascending - earlier is better)
     df_sorted = df.sort_values(by=["percentage", "timestamp"], ascending=[False, True])
+
+    # Add rank column (same score + earlier timestamp = better rank)
+    df_sorted = df_sorted.reset_index(drop=True)
+    df_sorted.insert(0, "Rank", range(1, len(df_sorted) + 1))
 
     st.subheader("Top scores")
     st.dataframe(
         df_sorted[
             [
+                "Rank",
                 "name",
                 "student_id",
                 "module",
@@ -417,6 +424,7 @@ def leaderboard_page():
             ]
         ],
         width="stretch",
+        hide_index=True,
     )
 
 
