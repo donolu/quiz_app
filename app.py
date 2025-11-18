@@ -736,20 +736,27 @@ def admin_page():
                     st.error("All correct answers must match the available options.")
                 else:
                     updated_row = {
-                        "id": edit_id,
-                        "module": module_edit.strip(),
-                        "question": question_edit.strip(),
-                        "options": options_updated,
-                        "answer": correct_edit[0],
-                        "correct_answers": correct_edit,
-                        "allow_multiple": allow_multi_edit,
-                        "difficulty": difficulty_edit,
-                        "image": image_edit.strip(),
-                        "explanation": explanation_edit.strip(),
+                        "id": int(edit_id),
+                        "module": str(module_edit).strip(),
+                        "question": str(question_edit).strip(),
+                        "options": options_updated,  # Already a list
+                        "answer": str(correct_edit[0]),
+                        "correct_answers": correct_edit,  # Already a list
+                        "allow_multiple": bool(allow_multi_edit),
+                        "difficulty": str(difficulty_edit),
+                        "image": str(image_edit).strip() if image_edit else "",
+                        "explanation": str(explanation_edit).strip(),
                     }
+                    # Remove the old row
                     questions_df = questions_df[questions_df["id"] != edit_id]
+                    # Create new DataFrame with explicit column order matching existing
+                    new_row_df = pd.DataFrame([updated_row])
+                    # Ensure all columns from original DataFrame exist in new row
+                    for col in questions_df.columns:
+                        if col not in new_row_df.columns:
+                            new_row_df[col] = ""
                     questions_df = pd.concat(
-                        [questions_df, pd.DataFrame([updated_row])], ignore_index=True
+                        [questions_df, new_row_df], ignore_index=True
                     )
                     questions_df = questions_df.sort_values("id").reset_index(drop=True)
                     save_questions(questions_df)
