@@ -158,12 +158,21 @@ def _prepare_question_records(
 ) -> List[Dict[str, Any]]:
     import math
 
+    # Define expected fields - filter out Supabase auto-generated fields
+    expected_fields = {
+        "id", "module", "question", "options", "answer", "correct_answers",
+        "allow_multiple", "difficulty", "image", "explanation"
+    }
+
     records: List[Dict[str, Any]] = []
     for row in df.to_dict("records"):
         record = {}
 
         # Handle each field with NaN checking
         for key, value in row.items():
+            # Skip Supabase auto-generated timestamp fields
+            if key not in expected_fields:
+                continue
             # Convert numpy types to Python natives first
             if hasattr(value, 'item'):  # numpy scalar
                 value = value.item()
