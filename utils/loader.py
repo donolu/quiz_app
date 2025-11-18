@@ -435,6 +435,8 @@ def load_questions() -> pd.DataFrame:
     ensure_data_files()
 
     global _QUESTIONS_CACHE
+    # Force cache refresh - 2025-11-18 after database cleanup
+    _QUESTIONS_CACHE = None
     if _QUESTIONS_CACHE is not None:
         return _QUESTIONS_CACHE.copy()
 
