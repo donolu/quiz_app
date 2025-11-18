@@ -974,11 +974,15 @@ def admin_page():
                             continue
 
                         allow_multiple_flag = row.get("allow_multiple")
-                        allow_multiple = (
-                            bool(allow_multiple_flag)
-                            if pd.notna(allow_multiple_flag)
-                            else len(parsed_answers) > 1
-                        )
+                        # Handle boolean conversion safely
+                        if pd.notna(allow_multiple_flag):
+                            # Convert to Python native type first
+                            if isinstance(allow_multiple_flag, str):
+                                allow_multiple = allow_multiple_flag.lower() in ["true", "1", "yes"]
+                            else:
+                                allow_multiple = bool(allow_multiple_flag)
+                        else:
+                            allow_multiple = len(parsed_answers) > 1
 
                         if allow_multiple and len(parsed_answers) < 2:
                             skipped_invalid_multiselect += 1
