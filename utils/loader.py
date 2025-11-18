@@ -182,21 +182,94 @@ def _prepare_question_records(
 def _prepare_score_records(
     df: pd.DataFrame, include_id: bool = True
 ) -> List[Dict[str, Any]]:
+    import math
+    import json
     records: List[Dict[str, Any]] = []
-    for row in df.to_dict("records"):
+
+    # Define expected fields - filter out any Supabase auto-generated fields
+    expected_fields = {
+        "id", "name", "student_id", "module", "score",
+        "total_questions", "timestamp", "time_limit_minutes"
+    }
+
+    for idx, row in enumerate(df.to_dict("records")):
         record = row.copy()
+
+        # Remove Supabase auto-generated fields
+        for key in list(record.keys()):
+            if key not in expected_fields:
+                record.pop(key, None)
+
         if not include_id:
             record.pop("id", None)
+
+        # Validate and clean all fields
+        for key, value in list(record.items()):
+            if pd.isna(value):
+                # Replace NaN with appropriate default
+                if key == "score":
+                    record[key] = 0.0
+                elif key in ["total_questions", "time_limit_minutes"]:
+                    record[key] = 0
+                elif key == "timestamp":
+                    # Provide current timestamp if missing
+                    from datetime import datetime
+                    record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    record[key] = ""
+            elif isinstance(value, float):
+                # Check for invalid float values
+                if math.isinf(value) or math.isnan(value):
+                    record[key] = 0.0
+                else:
+                    record[key] = float(value)
+            elif key == "timestamp" and (not value or str(value).strip() == ""):
+                # Fix empty timestamp
+                from datetime import datetime
+                record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Specific field validation
         if "score" in record:
             try:
-                record["score"] = float(record["score"])
+                score_val = float(record["score"])
+                if math.isinf(score_val) or math.isnan(score_val):
+                    record["score"] = 0.0
+                else:
+                    record["score"] = round(score_val, 4)
             except (TypeError, ValueError):
                 record["score"] = 0.0
+
         if "total_questions" in record:
             try:
                 record["total_questions"] = int(record["total_questions"])
             except (TypeError, ValueError):
                 record["total_questions"] = 0
+
+        if "time_limit_minutes" in record:
+            try:
+                time_val = record["time_limit_minutes"]
+                if pd.isna(time_val):
+                    record["time_limit_minutes"] = 0
+                else:
+                    record["time_limit_minutes"] = int(time_val)
+            except (TypeError, ValueError):
+                record["time_limit_minutes"] = 0
+
+        # Final JSON validation - try to serialize
+        try:
+            json.dumps(record)
+        except (ValueError, TypeError) as e:
+            # If serialization fails, log and fix the problematic record
+            print(f"⚠️ Warning: Record {idx} has invalid JSON values: {e}")
+            print(f"Record: {record}")
+            # Convert all numeric fields to safe values
+            for key, value in list(record.items()):
+                if isinstance(value, (int, float)):
+                    try:
+                        json.dumps(value)
+                    except (ValueError, TypeError):
+                        record[key] = 0 if isinstance(value, int) else 0.0
+
         records.append(record)
     return records
 
@@ -413,10 +486,65 @@ def save_scores(df: pd.DataFrame) -> None:
     if _USE_SUPABASE:
         client = _get_supabase_client()
         if client:
+            # Get existing scores count to determine if this is an append operation
+            existing_resp = client.table(SUPABASE_SCORES_TABLE).select("*", count="exact").execute()
+            existing_count = existing_resp.count if hasattr(existing_resp, 'count') else len(existing_resp.data or [])
+
             records = _prepare_score_records(df, include_id=False)
-            _supabase_delete_all(client, SUPABASE_SCORES_TABLE, "name", "__never__")
+
+            # Only delete all if we're replacing the entire dataset (used by admin clear function)
+            # Otherwise, append new scores
+            if len(records) < existing_count:
+                # This is likely a clear operation - delete all first
+                _supabase_delete_all(client, SUPABASE_SCORES_TABLE, "name", "__never__")
+            elif existing_count == 0:
+                # No existing scores, just insert
+                pass
+            else:
+                # Appending new scores - only insert the new ones
+                # Get the last N records (the new ones)
+                new_record_count = len(records) - existing_count
+                if new_record_count > 0:
+                    records = records[-new_record_count:]
+
             if records:
-                client.table(SUPABASE_SCORES_TABLE).insert(records).execute()
+                # Final safety check - convert all numpy/pandas types to Python natives
+                import json
+                from datetime import datetime
+                safe_records = []
+                for record in records:
+                    safe_record = {}
+                    for key, value in record.items():
+                        # Convert numpy/pandas types to Python natives
+                        if hasattr(value, 'item'):  # numpy scalar
+                            safe_record[key] = value.item()
+                        elif pd.isna(value):
+                            if key == "timestamp":
+                                safe_record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            elif key in ["score", "total_questions", "time_limit_minutes"]:
+                                safe_record[key] = 0
+                            else:
+                                safe_record[key] = ""
+                        elif key == "timestamp" and (not value or str(value).strip() == ""):
+                            # Fix empty timestamp
+                            safe_record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            safe_record[key] = value
+
+                    # Ensure timestamp is valid
+                    if not safe_record.get("timestamp") or str(safe_record.get("timestamp", "")).strip() == "":
+                        safe_record["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    # Final JSON serialization test
+                    try:
+                        json.dumps(safe_record)
+                        safe_records.append(safe_record)
+                    except (ValueError, TypeError) as e:
+                        print(f"⚠️ Skipping invalid record: {e}")
+                        print(f"Record: {safe_record}")
+
+                if safe_records:
+                    client.table(SUPABASE_SCORES_TABLE).insert(safe_records).execute()
         _invalidate_scores_cache()
         return
 

@@ -316,20 +316,47 @@ def quiz_page():
 
         # Save score
         scores_df = load_scores()
+
+        # Ensure score is valid (not inf, -inf, or nan)
+        import math
         final_score = round(score, 4)
-        new_row = pd.DataFrame(
-            [
-                {
-                    "name": name,
-                    "student_id": student_id,
-                    "module": st.session_state.quiz_module,
-                    "score": final_score,
-                    "total_questions": len(quiz_q),
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "time_limit_minutes": time_limit,
-                }
-            ]
-        )
+        if math.isnan(final_score) or math.isinf(final_score):
+            final_score = 0.0
+
+        # Ensure total_questions is valid
+        total_questions = len(quiz_q)
+        if total_questions <= 0:
+            total_questions = 1  # Avoid division by zero issues
+
+        # Ensure time_limit is valid
+        safe_time_limit = 0
+        try:
+            if time_limit:
+                safe_time_limit = int(time_limit)
+        except (TypeError, ValueError):
+            safe_time_limit = 0
+
+        # Create new score record with explicit type conversions
+        new_record = {
+            "name": str(name).strip() if name else "",
+            "student_id": str(student_id).strip() if student_id else "",
+            "module": str(st.session_state.quiz_module) if st.session_state.quiz_module else "",
+            "score": float(final_score),
+            "total_questions": int(total_questions),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "time_limit_minutes": int(safe_time_limit),
+        }
+
+        # Debug: verify the record is JSON-serializable
+        import json
+        try:
+            json.dumps(new_record)
+        except (ValueError, TypeError) as e:
+            st.error(f"❌ Error: Invalid score data - {e}")
+            st.write("Debug info:", new_record)
+            st.stop()
+
+        new_row = pd.DataFrame([new_record])
         scores_df = pd.concat([scores_df, new_row], ignore_index=True)
         save_scores(scores_df)
 
@@ -471,31 +498,67 @@ def admin_page():
     st.markdown("---")
     st.subheader("➕ Add a new question (Explanation REQUIRED)")
 
-    with st.form("add_question_form"):
+    # Initialize session state for add form
+    if "add_form_opt1" not in st.session_state:
+        st.session_state.add_form_opt1 = ""
+    if "add_form_opt2" not in st.session_state:
+        st.session_state.add_form_opt2 = ""
+    if "add_form_opt3" not in st.session_state:
+        st.session_state.add_form_opt3 = ""
+    if "add_form_opt4" not in st.session_state:
+        st.session_state.add_form_opt4 = ""
+
+    with st.form("add_question_form", clear_on_submit=True):
         module = st.text_input("Module / Topic", value="Basics")
         question_text = st.text_area("Question text")
 
         col1, col2 = st.columns(2)
         with col1:
-            opt1 = st.text_input("Option 1")
-            opt2 = st.text_input("Option 2")
+            opt1 = st.text_input("Option 1", key="form_opt1")
+            opt2 = st.text_input("Option 2", key="form_opt2")
         with col2:
-            opt3 = st.text_input("Option 3")
-            opt4 = st.text_input("Option 4")
+            opt3 = st.text_input("Option 3", key="form_opt3")
+            opt4 = st.text_input("Option 4", key="form_opt4")
 
-        options = [o for o in [opt1, opt2, opt3, opt4] if o and o.strip()]
+        # Store options in session state for preview
+        if opt1: st.session_state.add_form_opt1 = opt1
+        if opt2: st.session_state.add_form_opt2 = opt2
+        if opt3: st.session_state.add_form_opt3 = opt3
+        if opt4: st.session_state.add_form_opt4 = opt4
 
         allow_multi = st.checkbox("Allow multiple correct answers")
-        correct_choices = (
-            st.multiselect("Select correct answer(s)", options) if options else []
-        )
         difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
         image = st.text_input("Image URL (optional)")
         explanation = st.text_area("Explanation (REQUIRED)")
 
+        # Show available options preview
+        preview_opts = [o.strip() for o in [
+            st.session_state.add_form_opt1,
+            st.session_state.add_form_opt2,
+            st.session_state.add_form_opt3,
+            st.session_state.add_form_opt4
+        ] if o and o.strip()]
+
+        if preview_opts:
+            st.markdown("**Available options to choose from:**")
+            for i, opt in enumerate(preview_opts, 1):
+                st.caption(f"  {i}. `{opt}`")
+            st.caption("ℹ️ Copy and paste the exact text from above (including capitalization and spacing)")
+        else:
+            st.caption("ℹ️ Fill in the options above first, then copy the exact text below")
+
+        correct_answers_input = st.text_input(
+            "Enter correct answer(s) - separate multiple answers with | (pipe)",
+            help="Copy the exact text from the available options above. For multiple answers: Option A | Option B",
+            placeholder="e.g., Assets = Liabilities + Equity"
+        )
+
         submitted = st.form_submit_button("Add question")
 
     if submitted:
+        options = [o.strip() for o in [opt1, opt2, opt3, opt4] if o and o.strip()]
+        correct_choices = [c.strip() for c in correct_answers_input.split("|") if c.strip()] if correct_answers_input else []
+
         missing_fields = (
             not module.strip()
             or not question_text.strip()
@@ -505,11 +568,27 @@ def admin_page():
         )
         multi_invalid = allow_multi and len(correct_choices) < 2
         single_invalid = not allow_multi and len(correct_choices) != 1
-        if missing_fields or multi_invalid or single_invalid:
+        answers_not_in_options = any(ans not in options for ans in correct_choices)
+
+        if missing_fields:
             st.error(
-                "Provide module, question, at least two options, select valid answer(s), "
+                "❌ Provide module, question, at least two options, select valid answer(s), "
                 "and include an explanation."
             )
+        elif multi_invalid:
+            st.error("❌ For multiple choice questions, you must provide at least 2 correct answers separated by |")
+        elif single_invalid:
+            st.error("❌ For single answer questions, provide exactly one correct answer.")
+        elif answers_not_in_options:
+            st.error(f"❌ All correct answers must exactly match one of the options you entered above.")
+            st.warning("**Your options were:**")
+            for i, opt in enumerate(options, 1):
+                st.code(f"{i}. {opt}")
+            st.warning("**You entered as correct answer(s):**")
+            for i, ans in enumerate(correct_choices, 1):
+                is_valid = "✅" if ans in options else "❌"
+                st.code(f"{i}. {ans} {is_valid}")
+            st.info("💡 **Tip:** Copy and paste the exact text from your options, including capitalization and spacing.")
         else:
             new_id = int(questions_df["id"].max() + 1) if not questions_df.empty else 1
             correct_answers = [c.strip() for c in correct_choices]
@@ -531,7 +610,13 @@ def admin_page():
             )
             questions_df = pd.concat([questions_df, new_row], ignore_index=True)
             save_questions(questions_df)
-            st.success(f"Question added with ID {new_id}.")
+            # Clear session state
+            st.session_state.add_form_opt1 = ""
+            st.session_state.add_form_opt2 = ""
+            st.session_state.add_form_opt3 = ""
+            st.session_state.add_form_opt4 = ""
+            st.success(f"✅ Question added with ID {new_id}.")
+            st.rerun()
 
     # ---------------------------
     # Edit question
@@ -694,149 +779,225 @@ def admin_page():
         )
 
     # ---------------------------
-    # Import questions from Excel
+    # Import questions from Excel or CSV
     # ---------------------------
     st.markdown("---")
-    st.subheader("📥 Import / replace question bank from Excel")
+    st.subheader("📥 Import / replace question bank from Excel or CSV")
 
-    uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
     st.caption(
-        "Expected columns (min): module, question, option1, option2, answer. "
-        "Optional: option3, option4, difficulty, image, explanation, "
-        "allow_multiple, correct_answers (JSON array or pipe-delimited)."
+        "**Required columns:** module, question, option1, option2, answer, explanation. "
+        "**Optional:** option3, option4, difficulty, image, allow_multiple, correct_answers (JSON array or pipe-delimited)."
     )
 
+    uploaded_file = st.file_uploader("Upload Excel (.xlsx) or CSV file", type=["xlsx", "xls", "csv"], key="excel_uploader")
+
     if uploaded_file is not None:
-        try:
-            df_excel = pd.read_excel(uploaded_file)
-            required_cols = {
-                "module",
-                "question",
-                "option1",
-                "option2",
-                "answer",
-                "explanation",
-            }
-            if not required_cols.issubset(set(df_excel.columns)):
-                st.error(
-                    "Missing required columns. Required at minimum: "
-                    + ", ".join(sorted(required_cols))
-                )
-            else:
-                new_rows = []
-                skipped_no_options = 0
-                skipped_missing_explanation = 0
-                skipped_answer_mismatch = 0
-                skipped_invalid_multiselect = 0
+        # Show file info
+        file_details = {
+            "Filename": uploaded_file.name,
+            "File size": f"{uploaded_file.size / 1024:.2f} KB",
+            "File type": uploaded_file.type
+        }
+        st.json(file_details)
 
-                def parse_answers(value):
-                    if isinstance(value, list):
-                        return [str(v).strip() for v in value if str(v).strip()]
-                    if isinstance(value, str) and value.strip():
-                        text = value.strip()
-                        if text.startswith("["):
-                            try:
-                                data = json.loads(text)
-                                if isinstance(data, list):
-                                    return [
-                                        str(v).strip() for v in data if str(v).strip()
-                                    ]
-                            except json.JSONDecodeError:
-                                pass
-                        if "|" in text:
-                            return [
-                                part.strip() for part in text.split("|") if part.strip()
-                            ]
-                        return [text]
-                    return []
+        if st.button("Process uploaded file", type="primary"):
+            try:
+                # Determine file type and read accordingly
+                file_extension = uploaded_file.name.split('.')[-1].lower()
 
-                for _, row in df_excel.iterrows():
-                    opts = [
-                        row.get("option1"),
-                        row.get("option2"),
-                        row.get("option3"),
-                        row.get("option4"),
-                    ]
-                    opts = [o for o in opts if isinstance(o, str) and o.strip()]
-                    if not opts:
-                        skipped_no_options += 1
-                        continue
+                if file_extension == 'csv':
+                    df_excel = pd.read_csv(uploaded_file)
+                    st.info(f"✅ Successfully read CSV file with {len(df_excel)} rows")
+                elif file_extension in ['xlsx', 'xls']:
+                    # Try to read Excel with better error handling
+                    try:
+                        df_excel = pd.read_excel(uploaded_file, engine='openpyxl')
+                        st.info(f"✅ Successfully read Excel file with {len(df_excel)} rows")
+                    except Exception as excel_error:
+                        st.error(f"❌ Error reading Excel file: {str(excel_error)}")
+                        st.warning("💡 **Troubleshooting tips:**")
+                        st.markdown("""
+                        1. Make sure the file is a valid .xlsx file (not corrupted)
+                        2. Open the file in Excel/Google Sheets and verify it has data
+                        3. Try saving the file as CSV instead and upload that
+                        4. Ensure the file is not password protected
+                        5. Check that the first sheet contains your question data
+                        """)
 
-                    explanation = str(row.get("explanation", "") or "").strip()
-                    if not explanation:
-                        # Enforce explanation requirement even on import
-                        skipped_missing_explanation += 1
-                        continue
-
-                    raw_correct = row.get("correct_answers")
-                    parsed_answers = parse_answers(raw_correct)
-                    fallback_answer = str(row.get("answer", "") or "").strip()
-                    if not parsed_answers and fallback_answer:
-                        parsed_answers = [fallback_answer]
-
-                    if not parsed_answers:
-                        skipped_answer_mismatch += 1
-                        continue
-
-                    if any(ans not in opts for ans in parsed_answers):
-                        skipped_answer_mismatch += 1
-                        continue
-
-                    allow_multiple_flag = row.get("allow_multiple")
-                    allow_multiple = (
-                        bool(allow_multiple_flag)
-                        if pd.notna(allow_multiple_flag)
-                        else len(parsed_answers) > 1
-                    )
-
-                    if allow_multiple and len(parsed_answers) < 2:
-                        skipped_invalid_multiselect += 1
-                        continue
-                    if not allow_multiple and len(parsed_answers) != 1:
-                        # fall back to first answer
-                        parsed_answers = [parsed_answers[0]]
-
-                    new_rows.append(
-                        {
-                            "module": row.get("module", "General"),
-                            "question": row["question"],
-                            "options": opts,
-                            "answer": parsed_answers[0],
-                            "correct_answers": parsed_answers,
-                            "allow_multiple": allow_multiple,
-                            "difficulty": row.get("difficulty", "Easy"),
-                            "image": row.get("image", ""),
-                            "explanation": explanation,
-                        }
-                    )
-
-                if new_rows:
-                    new_df = pd.DataFrame(new_rows)
-                    new_df.insert(0, "id", range(1, len(new_df) + 1))
-                    save_questions(new_df)
-                    st.success(f"Imported {len(new_rows)} questions from Excel.")
+                        # Try reading all sheets
+                        try:
+                            excel_file = pd.ExcelFile(uploaded_file)
+                            st.info(f"Found {len(excel_file.sheet_names)} sheet(s): {', '.join(excel_file.sheet_names)}")
+                            if len(excel_file.sheet_names) > 0:
+                                st.info("Trying to read the first sheet...")
+                                df_excel = pd.read_excel(uploaded_file, sheet_name=excel_file.sheet_names[0])
+                            else:
+                                raise ValueError("No worksheets found in the Excel file")
+                        except Exception as e2:
+                            with st.expander("Show detailed error"):
+                                import traceback
+                                st.code(traceback.format_exc())
+                            st.stop()
                 else:
-                    st.warning("No valid rows found in the uploaded file.")
-                if skipped_no_options:
-                    st.warning(
-                        f"Skipped {skipped_no_options} row(s) without at least two options."
+                    st.error(f"Unsupported file type: .{file_extension}")
+                    st.stop()
+
+                required_cols = {
+                    "module",
+                    "question",
+                    "option1",
+                    "option2",
+                    "answer",
+                    "explanation",
+                }
+
+                # Show what columns we found
+                st.info(f"📋 Found columns: {', '.join(df_excel.columns.tolist())}")
+
+                if not required_cols.issubset(set(df_excel.columns)):
+                    missing_cols = required_cols - set(df_excel.columns)
+                    st.error(
+                        f"❌ Missing required columns: {', '.join(sorted(missing_cols))}"
                     )
-                if skipped_missing_explanation:
-                    st.warning(
-                        f"Skipped {skipped_missing_explanation} row(s) without explanations."
-                    )
-                if skipped_answer_mismatch:
-                    st.warning(
-                        f"Skipped {skipped_answer_mismatch} row(s) where the answer was blank or "
-                        "did not match any provided option."
-                    )
-                if skipped_invalid_multiselect:
-                    st.warning(
-                        f"Skipped {skipped_invalid_multiselect} row(s) with invalid multi-answer settings "
-                        "(need at least two correct answers when allow_multiple is true)."
-                    )
-        except Exception as e:
-            st.error(f"Error reading Excel file: {e}")
+                    st.info(f"Required columns: {', '.join(sorted(required_cols))}")
+                    st.info(f"Columns in your file: {', '.join(df_excel.columns.tolist())}")
+                    st.stop()
+                else:
+                    new_rows = []
+                    skipped_no_options = 0
+                    skipped_missing_explanation = 0
+                    skipped_answer_mismatch = 0
+                    skipped_invalid_multiselect = 0
+
+                    def parse_answers(value):
+                        if isinstance(value, list):
+                            return [str(v).strip() for v in value if str(v).strip()]
+                        if isinstance(value, str) and value.strip():
+                            text = value.strip()
+                            if text.startswith("["):
+                                try:
+                                    data = json.loads(text)
+                                    if isinstance(data, list):
+                                        return [
+                                            str(v).strip() for v in data if str(v).strip()
+                                        ]
+                                except json.JSONDecodeError:
+                                    pass
+                            if "|" in text:
+                                return [
+                                    part.strip() for part in text.split("|") if part.strip()
+                                ]
+                            return [text]
+                        return []
+
+                    for _, row in df_excel.iterrows():
+                        opts = [
+                            row.get("option1"),
+                            row.get("option2"),
+                            row.get("option3"),
+                            row.get("option4"),
+                        ]
+                        opts = [str(o).strip() for o in opts if pd.notna(o) and str(o).strip()]
+                        if len(opts) < 2:
+                            skipped_no_options += 1
+                            continue
+
+                        explanation = str(row.get("explanation", "") or "").strip()
+                        if not explanation:
+                            # Enforce explanation requirement even on import
+                            skipped_missing_explanation += 1
+                            continue
+
+                        raw_correct = row.get("correct_answers")
+                        parsed_answers = parse_answers(raw_correct)
+                        fallback_answer = str(row.get("answer", "") or "").strip()
+                        if not parsed_answers and fallback_answer:
+                            parsed_answers = [fallback_answer]
+
+                        if not parsed_answers:
+                            skipped_answer_mismatch += 1
+                            continue
+
+                        if any(ans not in opts for ans in parsed_answers):
+                            skipped_answer_mismatch += 1
+                            continue
+
+                        allow_multiple_flag = row.get("allow_multiple")
+                        allow_multiple = (
+                            bool(allow_multiple_flag)
+                            if pd.notna(allow_multiple_flag)
+                            else len(parsed_answers) > 1
+                        )
+
+                        if allow_multiple and len(parsed_answers) < 2:
+                            skipped_invalid_multiselect += 1
+                            continue
+                        if not allow_multiple and len(parsed_answers) != 1:
+                            # fall back to first answer
+                            parsed_answers = [parsed_answers[0]]
+
+                        new_rows.append(
+                            {
+                                "module": str(row.get("module", "General")).strip(),
+                                "question": str(row["question"]).strip(),
+                                "options": opts,
+                                "answer": parsed_answers[0],
+                                "correct_answers": parsed_answers,
+                                "allow_multiple": allow_multiple,
+                                "difficulty": str(row.get("difficulty", "Easy")).strip(),
+                                "image": str(row.get("image", "") or "").strip(),
+                                "explanation": explanation,
+                            }
+                        )
+
+                    if new_rows:
+                        new_df = pd.DataFrame(new_rows)
+                        new_df.insert(0, "id", range(1, len(new_df) + 1))
+                        save_questions(new_df)
+                        st.success(f"✅ Successfully imported {len(new_rows)} questions from Excel.")
+                        if skipped_no_options:
+                            st.warning(
+                                f"⚠️ Skipped {skipped_no_options} row(s) without at least two options."
+                            )
+                        if skipped_missing_explanation:
+                            st.warning(
+                                f"⚠️ Skipped {skipped_missing_explanation} row(s) without explanations."
+                            )
+                        if skipped_answer_mismatch:
+                            st.warning(
+                                f"⚠️ Skipped {skipped_answer_mismatch} row(s) where the answer was blank or "
+                                "did not match any provided option."
+                            )
+                        if skipped_invalid_multiselect:
+                            st.warning(
+                                f"⚠️ Skipped {skipped_invalid_multiselect} row(s) with invalid multi-answer settings "
+                                "(need at least two correct answers when allow_multiple is true)."
+                            )
+                        st.rerun()
+                    else:
+                        st.warning("No valid rows found in the uploaded file.")
+                        if skipped_no_options:
+                            st.info(
+                                f"Skipped {skipped_no_options} row(s) without at least two options."
+                            )
+                        if skipped_missing_explanation:
+                            st.info(
+                                f"Skipped {skipped_missing_explanation} row(s) without explanations."
+                            )
+                        if skipped_answer_mismatch:
+                            st.info(
+                                f"Skipped {skipped_answer_mismatch} row(s) where the answer was blank or "
+                                "did not match any provided option."
+                            )
+                        if skipped_invalid_multiselect:
+                            st.info(
+                                f"Skipped {skipped_invalid_multiselect} row(s) with invalid multi-answer settings."
+                            )
+            except Exception as e:
+                import traceback
+                st.error(f"❌ Error reading Excel file: {str(e)}")
+                with st.expander("Show detailed error"):
+                    st.code(traceback.format_exc())
 
     # ---------------------------
     # Clear leaderboard

@@ -1,0 +1,3 @@
+module,question,option1,option2,option3,option4,answer,explanation,difficulty
+Basics,What is the accounting equation?,Assets = Liabilities + Equity,Assets = Revenue - Expenses,Equity = Assets + Liabilities,Liabilities = Assets + Equity,Assets = Liabilities + Equity,"The accounting equation represents the relationship between assets, liabilities, and equity.",Easy
+Basics,Which of these is an expense?,Sales,Wages,Loan,Capital,Wages,Wages are an expense because they represent a cost incurred in running the business.,Easy

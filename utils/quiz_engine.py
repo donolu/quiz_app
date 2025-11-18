@@ -53,6 +53,7 @@ def calculate_score(
         score (float)
         detailed_results (List[Dict]) → for feedback panel
     """
+    import math
 
     score = 0.0
     detailed_results: List[Dict] = []
@@ -79,12 +80,21 @@ def calculate_score(
                 awarded = max_points
                 is_correct = True
             else:
-                awarded = max((true_pos - false_pos) / max(len(correct_set), 1), 0)
+                # Calculate partial credit, ensuring valid float
+                num_correct = len(correct_set)
+                if num_correct > 0:
+                    awarded = max((true_pos - false_pos) / num_correct, 0.0)
+                else:
+                    awarded = 0.0
                 awarded = round(awarded, 4)
         else:
             user_value = user_response if isinstance(user_response, str) else ""
             is_correct = user_value == (correct_answers[0] if correct_answers else "")
             awarded = max_points if is_correct else 0.0
+
+        # Ensure awarded score is valid
+        if math.isnan(awarded) or math.isinf(awarded):
+            awarded = 0.0
 
         score += awarded
 
@@ -100,5 +110,9 @@ def calculate_score(
                 "allow_multiple": allow_multiple,
             }
         )
+
+    # Ensure final score is valid
+    if math.isnan(score) or math.isinf(score):
+        score = 0.0
 
     return score, detailed_results

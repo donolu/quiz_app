@@ -1,5 +1,5 @@
 {
-  "show_explanations_for_correct": true,
+  "show_explanations_for_correct": false,
   "module_time_limits": {},
   "module_availability": {
     "Accounting Basics": false,
@@ -8,6 +8,7 @@
     "Financial Statements": false,
     "Internal Control & Ethics": false,
     "Journal Entries & Adjustments": false,
-    "Budgeting": true
+    "Budgeting": true,
+    "Basics": true
   }
 }
