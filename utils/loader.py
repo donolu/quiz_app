@@ -204,14 +204,39 @@ def _prepare_question_records(
         else:
             record.pop("id", None)
 
-        # Final JSON serialization test
+        # Final JSON serialization test with more aggressive cleaning
         try:
             json.dumps(record)
             records.append(record)
         except (ValueError, TypeError) as e:
-            print(f"Warning: Skipping question record due to serialization error: {e}")
-            print(f"Problematic record: {record}")
-            continue
+            # Try one more time with aggressive cleaning
+            print(f"⚠️ Warning: Question record failed serialization, attempting to fix: {e}")
+            cleaned_record = {}
+            for key, value in record.items():
+                try:
+                    # Test if this specific value is serializable
+                    json.dumps(value)
+                    cleaned_record[key] = value
+                except:
+                    # Replace problematic value with safe default
+                    if key in ["id"]:
+                        cleaned_record[key] = None
+                    elif key == "allow_multiple":
+                        cleaned_record[key] = False
+                    elif key in ["options", "correct_answers"]:
+                        cleaned_record[key] = []
+                    else:
+                        cleaned_record[key] = ""
+
+            # Try again with cleaned record
+            try:
+                json.dumps(cleaned_record)
+                records.append(cleaned_record)
+                print(f"✅ Successfully recovered question record after cleaning")
+            except:
+                print(f"❌ Unable to recover question record, skipping")
+                print(f"Problematic record: {record}")
+                continue
 
     return records
 
@@ -488,9 +513,13 @@ def save_questions(df: pd.DataFrame) -> None:
         client = _get_supabase_client()
         if client:
             records = _prepare_question_records(df, include_id=False)
-            _supabase_delete_all(client, SUPABASE_QUESTIONS_TABLE, "id", -1)
+            # IMPORTANT: Only delete if we have valid records to replace with
+            # This prevents data loss if record preparation fails
             if records:
+                _supabase_delete_all(client, SUPABASE_QUESTIONS_TABLE, "id", -1)
                 client.table(SUPABASE_QUESTIONS_TABLE).insert(records).execute()
+            else:
+                print("⚠️ WARNING: No valid question records to save. Keeping existing data.")
         _invalidate_questions_cache()
         return
 
