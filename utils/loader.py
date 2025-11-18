@@ -525,6 +525,16 @@ def load_questions() -> pd.DataFrame:
 # Save Questions
 # =============================================================================
 def save_questions(df: pd.DataFrame) -> None:
+    """Save questions to storage.
+
+    WARNING: This replaces ALL questions in the database.
+    Only call this when intentionally updating the question bank.
+    """
+    import traceback
+    print(f"🔔 save_questions() called with {len(df)} questions")
+    print(f"📍 Called from:")
+    for line in traceback.format_stack()[-4:-1]:
+        print(f"  {line.strip()}")
     ensure_data_files()
     df_to_save = df.copy()
 
@@ -546,12 +556,22 @@ def save_questions(df: pd.DataFrame) -> None:
         client = _get_supabase_client()
         if client:
             records = _prepare_question_records(df, include_id=False)
+            print(f"✅ Prepared {len(records)} valid records from {len(df)} input rows")
+
             # IMPORTANT: Only delete if we have valid records to replace with
             # This prevents data loss if record preparation fails
-            if records:
+            if records and len(records) >= len(df):
+                # All records prepared successfully
+                print(f"✅ All records valid, proceeding with save")
                 _supabase_delete_all(client, SUPABASE_QUESTIONS_TABLE, "id", -1)
                 client.table(SUPABASE_QUESTIONS_TABLE).insert(records).execute()
+            elif records and len(records) < len(df):
+                # Some records lost during preparation
+                error_msg = f"⚠️ WARNING: Only {len(records)}/{len(df)} records are valid. Refusing to save to prevent data loss."
+                print(error_msg)
+                raise ValueError(error_msg)
             else:
+                # No valid records at all
                 error_msg = f"⚠️ WARNING: No valid question records to save (attempted {len(df)} records). Keeping existing data. Check logs for details."
                 print(error_msg)
                 raise ValueError(error_msg)
