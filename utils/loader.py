@@ -156,9 +156,33 @@ def _get_supabase_client() -> Optional[Client]:
 def _prepare_question_records(
     df: pd.DataFrame, include_id: bool = True
 ) -> List[Dict[str, Any]]:
+    import math
+
     records: List[Dict[str, Any]] = []
     for row in df.to_dict("records"):
-        record = row.copy()
+        record = {}
+
+        # Handle each field with NaN checking
+        for key, value in row.items():
+            # Convert numpy types to Python natives and handle NaN
+            if hasattr(value, 'item'):  # numpy scalar
+                value = value.item()
+
+            # Handle NaN values
+            if pd.isna(value) or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
+                # Set appropriate defaults based on field
+                if key in ["image", "explanation", "module", "question", "answer", "difficulty"]:
+                    record[key] = ""
+                elif key in ["id"]:
+                    record[key] = None
+                elif key == "allow_multiple":
+                    record[key] = False
+                else:
+                    record[key] = value if value is not None else ""
+            else:
+                record[key] = value
+
+        # Parse JSON fields
         if isinstance(record.get("options"), str):
             try:
                 record["options"] = json.loads(record["options"])
@@ -169,27 +193,47 @@ def _prepare_question_records(
                 record["correct_answers"] = json.loads(record["correct_answers"])
             except json.JSONDecodeError:
                 record["correct_answers"] = []
+
+        # Ensure boolean
         record["allow_multiple"] = bool(record.get("allow_multiple"))
+
+        # Handle ID field
         if include_id:
             if record.get("id") is not None:
                 record["id"] = int(record["id"])
         else:
             record.pop("id", None)
-        records.append(record)
+
+        # Final JSON serialization test
+        try:
+            json.dumps(record)
+            records.append(record)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Skipping question record due to serialization error: {e}")
+            print(f"Problematic record: {record}")
+            continue
+
     return records
 
 
 def _prepare_score_records(
     df: pd.DataFrame, include_id: bool = True
 ) -> List[Dict[str, Any]]:
-    import math
     import json
+    import math
+
     records: List[Dict[str, Any]] = []
 
     # Define expected fields - filter out any Supabase auto-generated fields
     expected_fields = {
-        "id", "name", "student_id", "module", "score",
-        "total_questions", "timestamp", "time_limit_minutes"
+        "id",
+        "name",
+        "student_id",
+        "module",
+        "score",
+        "total_questions",
+        "timestamp",
+        "time_limit_minutes",
     }
 
     for idx, row in enumerate(df.to_dict("records")):
@@ -214,6 +258,7 @@ def _prepare_score_records(
                 elif key == "timestamp":
                     # Provide current timestamp if missing
                     from datetime import datetime
+
                     record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 else:
                     record[key] = ""
@@ -226,6 +271,7 @@ def _prepare_score_records(
             elif key == "timestamp" and (not value or str(value).strip() == ""):
                 # Fix empty timestamp
                 from datetime import datetime
+
                 record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Specific field validation
@@ -487,8 +533,14 @@ def save_scores(df: pd.DataFrame) -> None:
         client = _get_supabase_client()
         if client:
             # Get existing scores count to determine if this is an append operation
-            existing_resp = client.table(SUPABASE_SCORES_TABLE).select("*", count="exact").execute()
-            existing_count = existing_resp.count if hasattr(existing_resp, 'count') else len(existing_resp.data or [])
+            existing_resp = (
+                client.table(SUPABASE_SCORES_TABLE).select("*", count="exact").execute()
+            )
+            existing_count = (
+                existing_resp.count
+                if hasattr(existing_resp, "count")
+                else len(existing_resp.data or [])
+            )
 
             records = _prepare_score_records(df, include_id=False)
 
@@ -511,29 +563,45 @@ def save_scores(df: pd.DataFrame) -> None:
                 # Final safety check - convert all numpy/pandas types to Python natives
                 import json
                 from datetime import datetime
+
                 safe_records = []
                 for record in records:
                     safe_record = {}
                     for key, value in record.items():
                         # Convert numpy/pandas types to Python natives
-                        if hasattr(value, 'item'):  # numpy scalar
+                        if hasattr(value, "item"):  # numpy scalar
                             safe_record[key] = value.item()
                         elif pd.isna(value):
                             if key == "timestamp":
-                                safe_record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            elif key in ["score", "total_questions", "time_limit_minutes"]:
+                                safe_record[key] = datetime.now().strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                )
+                            elif key in [
+                                "score",
+                                "total_questions",
+                                "time_limit_minutes",
+                            ]:
                                 safe_record[key] = 0
                             else:
                                 safe_record[key] = ""
-                        elif key == "timestamp" and (not value or str(value).strip() == ""):
+                        elif key == "timestamp" and (
+                            not value or str(value).strip() == ""
+                        ):
                             # Fix empty timestamp
-                            safe_record[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            safe_record[key] = datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
                         else:
                             safe_record[key] = value
 
                     # Ensure timestamp is valid
-                    if not safe_record.get("timestamp") or str(safe_record.get("timestamp", "")).strip() == "":
-                        safe_record["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if (
+                        not safe_record.get("timestamp")
+                        or str(safe_record.get("timestamp", "")).strip() == ""
+                    ):
+                        safe_record["timestamp"] = datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
 
                     # Final JSON serialization test
                     try:

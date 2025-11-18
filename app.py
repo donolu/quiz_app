@@ -319,6 +319,7 @@ def quiz_page():
 
         # Ensure score is valid (not inf, -inf, or nan)
         import math
+
         final_score = round(score, 4)
         if math.isnan(final_score) or math.isinf(final_score):
             final_score = 0.0
@@ -340,7 +341,9 @@ def quiz_page():
         new_record = {
             "name": str(name).strip() if name else "",
             "student_id": str(student_id).strip() if student_id else "",
-            "module": str(st.session_state.quiz_module) if st.session_state.quiz_module else "",
+            "module": str(st.session_state.quiz_module)
+            if st.session_state.quiz_module
+            else "",
             "score": float(final_score),
             "total_questions": int(total_questions),
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -349,6 +352,7 @@ def quiz_page():
 
         # Debug: verify the record is JSON-serializable
         import json
+
         try:
             json.dumps(new_record)
         except (ValueError, TypeError) as e:
@@ -521,10 +525,14 @@ def admin_page():
             opt4 = st.text_input("Option 4", key="form_opt4")
 
         # Store options in session state for preview
-        if opt1: st.session_state.add_form_opt1 = opt1
-        if opt2: st.session_state.add_form_opt2 = opt2
-        if opt3: st.session_state.add_form_opt3 = opt3
-        if opt4: st.session_state.add_form_opt4 = opt4
+        if opt1:
+            st.session_state.add_form_opt1 = opt1
+        if opt2:
+            st.session_state.add_form_opt2 = opt2
+        if opt3:
+            st.session_state.add_form_opt3 = opt3
+        if opt4:
+            st.session_state.add_form_opt4 = opt4
 
         allow_multi = st.checkbox("Allow multiple correct answers")
         difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
@@ -532,32 +540,44 @@ def admin_page():
         explanation = st.text_area("Explanation (REQUIRED)")
 
         # Show available options preview
-        preview_opts = [o.strip() for o in [
-            st.session_state.add_form_opt1,
-            st.session_state.add_form_opt2,
-            st.session_state.add_form_opt3,
-            st.session_state.add_form_opt4
-        ] if o and o.strip()]
+        preview_opts = [
+            o.strip()
+            for o in [
+                st.session_state.add_form_opt1,
+                st.session_state.add_form_opt2,
+                st.session_state.add_form_opt3,
+                st.session_state.add_form_opt4,
+            ]
+            if o and o.strip()
+        ]
 
         if preview_opts:
             st.markdown("**Available options to choose from:**")
             for i, opt in enumerate(preview_opts, 1):
                 st.caption(f"  {i}. `{opt}`")
-            st.caption("ℹ️ Copy and paste the exact text from above (including capitalization and spacing)")
+            st.caption(
+                "ℹ️ Copy and paste the exact text from above (including capitalization and spacing)"
+            )
         else:
-            st.caption("ℹ️ Fill in the options above first, then copy the exact text below")
+            st.caption(
+                "ℹ️ Fill in the options above first, then copy the exact text below"
+            )
 
         correct_answers_input = st.text_input(
             "Enter correct answer(s) - separate multiple answers with | (pipe)",
             help="Copy the exact text from the available options above. For multiple answers: Option A | Option B",
-            placeholder="e.g., Assets = Liabilities + Equity"
+            placeholder="e.g., Assets = Liabilities + Equity",
         )
 
         submitted = st.form_submit_button("Add question")
 
     if submitted:
         options = [o.strip() for o in [opt1, opt2, opt3, opt4] if o and o.strip()]
-        correct_choices = [c.strip() for c in correct_answers_input.split("|") if c.strip()] if correct_answers_input else []
+        correct_choices = (
+            [c.strip() for c in correct_answers_input.split("|") if c.strip()]
+            if correct_answers_input
+            else []
+        )
 
         missing_fields = (
             not module.strip()
@@ -576,11 +596,17 @@ def admin_page():
                 "and include an explanation."
             )
         elif multi_invalid:
-            st.error("❌ For multiple choice questions, you must provide at least 2 correct answers separated by |")
+            st.error(
+                "❌ For multiple choice questions, you must provide at least 2 correct answers separated by |"
+            )
         elif single_invalid:
-            st.error("❌ For single answer questions, provide exactly one correct answer.")
+            st.error(
+                "❌ For single answer questions, provide exactly one correct answer."
+            )
         elif answers_not_in_options:
-            st.error(f"❌ All correct answers must exactly match one of the options you entered above.")
+            st.error(
+                "❌ All correct answers must exactly match one of the options you entered above."
+            )
             st.warning("**Your options were:**")
             for i, opt in enumerate(options, 1):
                 st.code(f"{i}. {opt}")
@@ -588,7 +614,9 @@ def admin_page():
             for i, ans in enumerate(correct_choices, 1):
                 is_valid = "✅" if ans in options else "❌"
                 st.code(f"{i}. {ans} {is_valid}")
-            st.info("💡 **Tip:** Copy and paste the exact text from your options, including capitalization and spacing.")
+            st.info(
+                "💡 **Tip:** Copy and paste the exact text from your options, including capitalization and spacing."
+            )
         else:
             new_id = int(questions_df["id"].max() + 1) if not questions_df.empty else 1
             correct_answers = [c.strip() for c in correct_choices]
@@ -789,30 +817,36 @@ def admin_page():
         "**Optional:** option3, option4, difficulty, image, allow_multiple, correct_answers (JSON array or pipe-delimited)."
     )
 
-    uploaded_file = st.file_uploader("Upload Excel (.xlsx) or CSV file", type=["xlsx", "xls", "csv"], key="excel_uploader")
+    uploaded_file = st.file_uploader(
+        "Upload Excel (.xlsx) or CSV file",
+        type=["xlsx", "xls", "csv"],
+        key="excel_uploader",
+    )
 
     if uploaded_file is not None:
         # Show file info
         file_details = {
             "Filename": uploaded_file.name,
             "File size": f"{uploaded_file.size / 1024:.2f} KB",
-            "File type": uploaded_file.type
+            "File type": uploaded_file.type,
         }
         st.json(file_details)
 
         if st.button("Process uploaded file", type="primary"):
             try:
                 # Determine file type and read accordingly
-                file_extension = uploaded_file.name.split('.')[-1].lower()
+                file_extension = uploaded_file.name.split(".")[-1].lower()
 
-                if file_extension == 'csv':
+                if file_extension == "csv":
                     df_excel = pd.read_csv(uploaded_file)
                     st.info(f"✅ Successfully read CSV file with {len(df_excel)} rows")
-                elif file_extension in ['xlsx', 'xls']:
+                elif file_extension in ["xlsx", "xls"]:
                     # Try to read Excel with better error handling
                     try:
-                        df_excel = pd.read_excel(uploaded_file, engine='openpyxl')
-                        st.info(f"✅ Successfully read Excel file with {len(df_excel)} rows")
+                        df_excel = pd.read_excel(uploaded_file, engine="openpyxl")
+                        st.info(
+                            f"✅ Successfully read Excel file with {len(df_excel)} rows"
+                        )
                     except Exception as excel_error:
                         st.error(f"❌ Error reading Excel file: {str(excel_error)}")
                         st.warning("💡 **Troubleshooting tips:**")
@@ -827,15 +861,22 @@ def admin_page():
                         # Try reading all sheets
                         try:
                             excel_file = pd.ExcelFile(uploaded_file)
-                            st.info(f"Found {len(excel_file.sheet_names)} sheet(s): {', '.join(excel_file.sheet_names)}")
+                            st.info(
+                                f"Found {len(excel_file.sheet_names)} sheet(s): {', '.join(excel_file.sheet_names)}"
+                            )
                             if len(excel_file.sheet_names) > 0:
                                 st.info("Trying to read the first sheet...")
-                                df_excel = pd.read_excel(uploaded_file, sheet_name=excel_file.sheet_names[0])
+                                df_excel = pd.read_excel(
+                                    uploaded_file, sheet_name=excel_file.sheet_names[0]
+                                )
                             else:
-                                raise ValueError("No worksheets found in the Excel file")
-                        except Exception as e2:
+                                raise ValueError(
+                                    "No worksheets found in the Excel file"
+                                )
+                        except Exception:
                             with st.expander("Show detailed error"):
                                 import traceback
+
                                 st.code(traceback.format_exc())
                             st.stop()
                 else:
@@ -860,7 +901,9 @@ def admin_page():
                         f"❌ Missing required columns: {', '.join(sorted(missing_cols))}"
                     )
                     st.info(f"Required columns: {', '.join(sorted(required_cols))}")
-                    st.info(f"Columns in your file: {', '.join(df_excel.columns.tolist())}")
+                    st.info(
+                        f"Columns in your file: {', '.join(df_excel.columns.tolist())}"
+                    )
                     st.stop()
                 else:
                     new_rows = []
@@ -879,13 +922,17 @@ def admin_page():
                                     data = json.loads(text)
                                     if isinstance(data, list):
                                         return [
-                                            str(v).strip() for v in data if str(v).strip()
+                                            str(v).strip()
+                                            for v in data
+                                            if str(v).strip()
                                         ]
                                 except json.JSONDecodeError:
                                     pass
                             if "|" in text:
                                 return [
-                                    part.strip() for part in text.split("|") if part.strip()
+                                    part.strip()
+                                    for part in text.split("|")
+                                    if part.strip()
                                 ]
                             return [text]
                         return []
@@ -897,7 +944,11 @@ def admin_page():
                             row.get("option3"),
                             row.get("option4"),
                         ]
-                        opts = [str(o).strip() for o in opts if pd.notna(o) and str(o).strip()]
+                        opts = [
+                            str(o).strip()
+                            for o in opts
+                            if pd.notna(o) and str(o).strip()
+                        ]
                         if len(opts) < 2:
                             skipped_no_options += 1
                             continue
@@ -944,7 +995,9 @@ def admin_page():
                                 "answer": parsed_answers[0],
                                 "correct_answers": parsed_answers,
                                 "allow_multiple": allow_multiple,
-                                "difficulty": str(row.get("difficulty", "Easy")).strip(),
+                                "difficulty": str(
+                                    row.get("difficulty", "Easy")
+                                ).strip(),
                                 "image": str(row.get("image", "") or "").strip(),
                                 "explanation": explanation,
                             }
@@ -954,7 +1007,9 @@ def admin_page():
                         new_df = pd.DataFrame(new_rows)
                         new_df.insert(0, "id", range(1, len(new_df) + 1))
                         save_questions(new_df)
-                        st.success(f"✅ Successfully imported {len(new_rows)} questions from Excel.")
+                        st.success(
+                            f"✅ Successfully imported {len(new_rows)} questions from Excel."
+                        )
                         if skipped_no_options:
                             st.warning(
                                 f"⚠️ Skipped {skipped_no_options} row(s) without at least two options."
@@ -995,6 +1050,7 @@ def admin_page():
                             )
             except Exception as e:
                 import traceback
+
                 st.error(f"❌ Error reading Excel file: {str(e)}")
                 with st.expander("Show detailed error"):
                     st.code(traceback.format_exc())
