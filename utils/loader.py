@@ -164,12 +164,33 @@ def _prepare_question_records(
 
         # Handle each field with NaN checking
         for key, value in row.items():
-            # Convert numpy types to Python natives and handle NaN
+            # Convert numpy types to Python natives first
             if hasattr(value, 'item'):  # numpy scalar
                 value = value.item()
 
-            # Handle NaN values
-            if pd.isna(value) or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
+            # Check for NaN/None/inf values - handle each type carefully to avoid array ambiguity
+            is_null = False
+            try:
+                # Try scalar NaN check first
+                if value is None:
+                    is_null = True
+                elif isinstance(value, float):
+                    if math.isnan(value) or math.isinf(value):
+                        is_null = True
+                elif isinstance(value, str) and not value.strip():
+                    is_null = True
+                else:
+                    # Use pd.isna for other types, but catch array errors
+                    try:
+                        if pd.isna(value):
+                            is_null = True
+                    except (ValueError, TypeError):
+                        # If pd.isna fails (array-like), assume it's valid
+                        is_null = False
+            except:
+                is_null = False
+
+            if is_null:
                 # Set appropriate defaults based on field
                 if key in ["image", "explanation", "module", "question", "answer", "difficulty"]:
                     record[key] = ""
@@ -178,7 +199,7 @@ def _prepare_question_records(
                 elif key == "allow_multiple":
                     record[key] = False
                 else:
-                    record[key] = value if value is not None else ""
+                    record[key] = ""
             else:
                 record[key] = value
 
